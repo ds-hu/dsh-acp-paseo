@@ -49,6 +49,14 @@ async function runProbe(request: ProviderConnectRequest): Promise<ProbeResult> {
     Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
   );
   const connection = app.connect(stream);
+  child.on('error', (error: any) => {
+    console.error(`[dsh-probe] spawn failed: ${error?.message ?? String(error)}`);
+    try {
+      connection.close?.();
+    } catch {
+      /* ignore */
+    }
+  });
   try {
     const response: any = await connection.agent.request('initialize', {
       protocolVersion: 1,
