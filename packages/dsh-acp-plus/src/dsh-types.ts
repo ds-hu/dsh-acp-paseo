@@ -102,6 +102,10 @@ export function service<T = any>(ctx: DshContext, name: string): T | undefined {
   } catch {
     /* fall through to property access */
   }
-  const direct = ctx[name];
-  return direct === undefined ? undefined : (direct as T);
+  try {
+    return ctx[name] === undefined ? undefined : (ctx[name] as T);
+  } catch {
+    /* Cordis proxies throw on undeclared property access */
+    return undefined;
+  }
 }
