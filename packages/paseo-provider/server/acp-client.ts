@@ -72,6 +72,14 @@ export class AcpSessionClient {
       stdio: 'pipe',
     });
     this.child = child;
+    child.on('error', (error: any) => {
+      this.hooks.onLog?.(`dsh spawn failed: ${error?.message ?? String(error)}`);
+      try {
+        this.connection?.close?.();
+      } catch {
+        /* ignore */
+      }
+    });
     child.stderr?.on('data', (chunk: Buffer) => {
       this.hooks.onLog?.(chunk.toString('utf8').trimEnd());
     });
