@@ -109,6 +109,40 @@ function compactSelection(selection: ModelSelectionState | undefined): Record<st
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Decode the `provider/model` route id a client passes as `_meta.paseo.model`. */
+function selectionFromPaseoId(id: unknown): ModelSelectionState | undefined {
+  if (typeof id !== 'string') return undefined;
+  const slash = id.indexOf('/');
+  if (slash <= 0 || slash === id.length - 1) return undefined;
+  return { provider: id.slice(0, slash), model: id.slice(slash + 1) };
+}
+
+/** Last route the session actually used, read from replayed request headers. */
+function lastHeaderSelection(events: readonly any[] | undefined): ModelSelectionState | undefined {
+  for (let index = (events?.length ?? 0) - 1; index >= 0; index -= 1) {
+    const event = events?.[index];
+    if (event?.type !== 'request/header') continue;
+    const config = event.data?.header?.config;
+    if (typeof config?.provider !== 'string' || typeof config?.model !== 'string') continue;
+    return {
+      provider: config.provider,
+      model: config.model,
+      ...(typeof config.reasoningEffort === 'string' ? { reasoningEffort: config.reasoningEffort } : {}),
+    };
+  }
+  return undefined;
+}
+
+/** Client-requested route first, then the last route the session used, then the deployment default. */
+function resolveInitialSelection(
+  paseo: Record<string, any> | undefined,
+  events: readonly any[] | undefined,
+  fallback: ModelSelectionState | undefined,
+): ModelSelectionState | undefined {
+  const selection = selectionFromPaseoId(paseo?.model) ?? lastHeaderSelection(events) ?? fallback;
+  return selection?.provider && selection.model ? selection : undefined;
+}
+
 function preapprovedNames(toolPolicy: any): Set<string> {
   const names = new Set<string>();
   const entries = Array.isArray(toolPolicy?.preapproved) ? toolPolicy.preapproved : [];
@@ -183,7 +217,7 @@ export class SessionBridge {
       caps: input.caps ?? {},
       paseo: input.paseo ?? {},
       preapproved: preapprovedNames(input.paseo?.toolPolicy),
-      selectionRef: { current: undefined, assembled: undefined },
+      selectionRef: { current: resolveInitialSelection(input.paseo, undefined, this.defaultSelection()), assembled: undefined },
       stream: new StreamAccumulator(),
       streamedSteps: new Set(),
       pendingTurn: null,
@@ -274,7 +308,6 @@ export class SessionBridge {
     const paseo = extractPaseo(params?._meta);
     const sessionId = randomUUID();
     const record = this.createRecord({ id: sessionId, cwd, caps: this.currentCaps, paseo, state: 'loading' });
-    record.selectionRef.current = this.defaultSelection();
     try {
       const handle = await this.createAgent(record, mcpConfigs);
       record.agent = handle.agent;
@@ -328,6 +361,7 @@ export class SessionBridge {
       paseo: extractPaseo(params?._meta),
       state: 'loading',
     });
+    record.selectionRef.current = resolveInitialSelection(record.paseo, snapshot?.events, record.selectionRef.current);
     this.sessions.set(sessionId, record);
     try {
       this.replay(record, snapshot?.events ?? []);
@@ -641,7 +675,6 @@ export class SessionBridge {
     const seed = buildForkSeed(prefix as any, boundary as any);
     const newId = randomUUID();
     const record = this.createRecord({ id: newId, cwd, caps: this.currentCaps, paseo: {}, state: 'loading' });
-    record.selectionRef.current = this.defaultSelection();
     try {
       const handle = await this.deps.ctx.agents.create({
         sessionId: newId,

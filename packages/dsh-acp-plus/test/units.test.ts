@@ -20,6 +20,7 @@ import {
 } from '../src/meta.js';
 import { mcpPluginConfig, resolveMcpConfigs } from '../src/mcp.js';
 import { buildSessionModes } from '../src/modes.js';
+import { SessionBridge } from '../src/session.js';
 import { StreamAccumulator } from '../src/stream.js';
 import {
   inferToolKind,
@@ -405,5 +406,40 @@ describe('agent presets as session modes', () => {
       { id: 'custom', name: 'Team mode', description: 'House rules' },
     ]);
     expect(modes?.currentModeId).toBe('first');
+  });
+});
+
+describe('session open model selection', () => {
+  const bridge = (defaults: { defaultProvider?: string; defaultModel?: string } = {}) =>
+    new SessionBridge({
+      ctx: {} as any,
+      log: { debug: () => undefined } as any,
+      pageSize: 20,
+      questionTimeoutMs: 600,
+      replayLimit: 200,
+      getClient: () => null,
+      imageEnabled: () => true,
+      ...defaults,
+    });
+
+  const record = (paseo: Record<string, any>, defaults: { defaultProvider?: string; defaultModel?: string } = {}) =>
+    bridge(defaults).createRecord({ id: 's1', cwd: '/work', caps: {}, paseo, state: 'loading' });
+
+  it('opens a resumed session with the route the client asks for', () => {
+    expect(record({ model: 'commandcode-goat-autosync/deepseek/deepseek-v4.1-flash' }).selectionRef.current).toEqual({
+      provider: 'commandcode-goat-autosync',
+      model: 'deepseek/deepseek-v4.1-flash',
+    });
+  });
+
+  it('falls back to the deployment default when the client names no route', () => {
+    expect(record({}, { defaultProvider: 'deepseek-official', defaultModel: 'deepseek-v4-flash' }).selectionRef.current).toEqual({
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-flash',
+    });
+  });
+
+  it('ignores a route id without a provider segment', () => {
+    expect(record({ model: 'deepseek-v4-flash' }).selectionRef.current).toBeUndefined();
   });
 });
